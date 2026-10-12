@@ -1,0 +1,11 @@
+# 运行时生成物（含你的 OCID / 密钥，请勿提交）
+oci-info.env
+arm.env
+oci.env
+*.pem
+*.key
+
+# 工具 / 系统生成
+.mimosa/
+.DS_Store
+Thumbs.db
