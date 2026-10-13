@@ -2,7 +2,7 @@
 
 甲骨文云（OCI）Always Free ARM 实例自动创建工具包。
 
-抢的是 `VM.Standard.A1.Flex`（2 OCPU + 12GB）这一档免费规格。热门区域的 ARM 容量长期紧张，手动点控制台基本抢不到。这个工具包替你盯着：循环调用官方 API 尝试创建，当前可用性域没容量就等一会儿换下一个，抢到之后自动收手，不会重复创建。
+目标规格为 `VM.Standard.A1.Flex`（2 OCPU + 12GB）。Always Free 的 ARM 容量长期不足，手动创建通常失败。脚本按固定间隔循环调用官方 API 请求创建；当前可用性域无容量时轮换到下一个。创建成功后脚本退出，不重复创建。
 
 ![Shell](https://img.shields.io/badge/Shell-bash-4EAA25?logo=gnubash&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Ubuntu%20%7C%20Debian%20%7C%20Git%20Bash-blue)
@@ -30,10 +30,10 @@
 | `oci-arm-catcher.sh` | 服务器或任意 Linux | **核心脚本**。循环创建实例，分类错误，轮换可用性域，成功后退出。可独立运行。 |
 | `oci-arm-auto.sh` | 服务器（Ubuntu / Debian，可用 E2.Micro 充当） | **部署器**。安装 OCI CLI、生成密钥、引导添加公钥、验证认证、查询子网与镜像、生成配置文件、启动抢购。 |
 | `oci-info-from-tabbit.sh` | 本机（Windows + Git Bash） | **提取器**。从已登录的 Tabbit 浏览器读取租户 OCID、用户 OCID、区域代码与指纹。 |
-| `tests/catcher-selftest.sh` | 任意（需 python3） | **离线自检**。用桩命令验证核心脚本，不触网。 |
-| `GUIDE.md` | — | **使用指南**。含每一项信息的获取位置、格式、验证方法与信息对照检查清单。 |
+| `tests/catcher-selftest.sh` | 任意（需 python3） | **离线自检**。用桩命令验证核心脚本，不联网。 |
+| `GUIDE.md` | — | **使用指南**。含各项信息的获取位置、格式、验证方法与对照检查清单。 |
 
-> 下文固定用三个简称：核心脚本（`oci-arm-catcher.sh`）、部署器（`oci-arm-auto.sh`）、提取器（`oci-info-from-tabbit.sh`）。
+下文使用三个简称：核心脚本、部署器、提取器。
 
 ## 🔄 工作流程
 
@@ -55,56 +55,54 @@ flowchart LR
   C -->|"循环调用 instance launch"| O
 ```
 
-> 本机这一侧负责把接入信息准备好，服务器那一侧负责挂机执行。
+本机准备接入信息，服务器执行抢购。
 
 ## 📝 前置条件
 
 | 条件 | 说明 |
 |---|---|
-| Oracle Cloud 账号 | 还没有账号时，先读 [GUIDE.md](GUIDE.md) 第 10 章（注册导读）。**Home Region 选定后不可更改，Always Free 实例只能在 Home Region 创建。** |
-| 一台常开的 Linux 服务器 | Ubuntu 或 Debian。可用 Always Free E2.Micro（1/8 OCPU + 1GB）充当引导机，每账号最多 2 台。不要用自己的电脑 24 小时开机。 |
-| 网络访问 | 服务器需要能访问 OCI API（`cloud.oracle.com`）。 |
+| Oracle Cloud 账号 | 没有账号时先读 [GUIDE.md](GUIDE.md) 第 10 章。Home Region 选定后不可更改，Always Free 实例只能在 Home Region 创建。 |
+| 常开的 Linux 服务器 | Ubuntu 或 Debian。Always Free E2.Micro（1/8 OCPU + 1GB）可作引导机，每账号最多 2 台。抢购需长期运行，不宜使用个人电脑。 |
+| 网络访问 | 服务器需能访问 OCI API（`cloud.oracle.com`）。 |
 
-额度口径：实例集上限为全部 A1 实例合计 2 OCPU + 12GB（2026-06 起）。月度用量池以你账号控制台横幅为准。
+额度：A1 实例集上限为 2 OCPU + 12GB（2026-06 起）。月度用量池以控制台横幅为准。
 
 ## 🚀 快速开始
 
-按你的情况挑一条路：
-
-| 你的情况 | 方式 | 入口 |
+| 情况 | 方式 | 入口 |
 |---|---|---|
-| 用 AI Agent（Claude Code、ZCode 等）代劳 | 方式 C | [Agent 提示词模板](#方式-cagent-提示词调用) |
-| 电脑装有 Tabbit，且已登录控制台 | 方式 A | 全自动流水线（GUIDE 4.3） |
-| 不用 Tabbit，愿按提示输入少量信息 | 方式 B | 交互式部署（GUIDE 4.2） |
-| 想理解原理，逐条命令手工执行 | 方式 D | GUIDE 4.1 全手动 |
+| 使用 AI Agent（Claude Code、ZCode 等） | 方式 C | [Agent 提示词模板](#方式-cagent-提示词调用) |
+| 本机装有 Tabbit 并已登录控制台 | 方式 A | 全自动流水线（GUIDE 4.3） |
+| 不使用 Tabbit | 方式 B | 交互式部署（GUIDE 4.2） |
+| 逐条命令手工执行 | 方式 D | GUIDE 4.1 |
 
-**获取工具包**　`git clone https://github.com/Circumsized/oci-arm-kit.git`，或在仓库页 Code → Download ZIP。
+获取工具包：`git clone https://github.com/Circumsized/oci-arm-kit.git`；无 git 时从仓库页 Code → Download ZIP 下载。
 
 ### 方式 A：全自动（本机有 Tabbit）
 
 ```bash
-# 1. 本机读取接入信息。产出 oci-info.env。
+# 1. 本机读取接入信息，产出 oci-info.env
 bash oci-info-from-tabbit.sh -o oci-info.env
 
-# 2. 上传三个文件到服务器。<KEY> 为 SSH 私钥路径。<SERVER> 为服务器地址。
+# 2. 上传到服务器（<KEY>：SSH 私钥路径；<SERVER>：服务器地址）
 scp -i <KEY> oci-arm-auto.sh oci-arm-catcher.sh oci-info.env ubuntu@<SERVER>:~/
 
-# 3. 部署。部署器与核心脚本必须位于同一目录。
+# 3. 部署（两个脚本须在同一目录）
 ssh -t -i <KEY> ubuntu@<SERVER> "source ~/oci-info.env && bash ~/oci-arm-auto.sh"
 ```
 
-运行到中间会停下来打印一段公钥。把它粘到控制台的 API 密钥页，回来按回车，后面的步骤就全自动了。
+部署器中途输出公钥。粘贴到控制台 API 密钥页，返回终端按回车。
 
-### 方式 B：交互式（不需要 Tabbit）
+### 方式 B：交互式（不使用 Tabbit）
 
 ```bash
 scp -i <KEY> oci-arm-auto.sh oci-arm-catcher.sh ubuntu@<SERVER>:~/
 ssh -t -i <KEY> ubuntu@<SERVER> "bash ~/oci-arm-auto.sh"
 ```
 
-整个部署过程只有三处需要你动手：粘贴公钥、按一次回车、填入三个标识（用户 OCID、租户 OCID、区域代码）。每一步都标注了在控制台哪里找。装完之后部署器会自动把抢购挂到后台。
+部署过程需三次输入：公钥粘贴确认、回车、三个标识（用户 OCID、租户 OCID、区域代码）。每步均标注控制台位置。部署器完成后自动在后台启动抢购。
 
-部署结束后确认进程存活：
+确认进程：
 
 ```bash
 pgrep -af oci-arm-catcher
@@ -112,7 +110,7 @@ pgrep -af oci-arm-catcher
 
 ### 方式 C：Agent 提示词调用
 
-将下面模板补全后发送给 AI Agent。完整模板见 [GUIDE.md](GUIDE.md) 第 5 章。
+模板补全后发送给 AI Agent。完整模板见 [GUIDE.md](GUIDE.md) 第 5 章。
 
 ```text
 帮我部署甲骨文 ARM 抢购工具包，信息如下：
@@ -151,7 +149,7 @@ pgrep -af oci-arm-catcher
 | `AVAILABILITY_DOMAIN(S)` | Direct 模式 | 是 | 单个，或逗号分隔多个。多个时自动轮换 |
 | `DISPLAY_NAME` / `OCPUS` / `MEMORY_GB` / `RETRY_INTERVAL` | 通用 | 否 | 默认 `arm-free-1` / `2` / `12` / `300` |
 
-退出码的含义：`0` 成功，`1` 配置错误或遇到不可重试的错误，`2` 参数错误，`3` 是 `--once` 模式下容量不足。
+退出码：`0` 成功，`1` 配置错误或不可重试的错误，`2` 参数错误，`3` `--once` 模式下容量不足。
 
 ### 部署器（oci-arm-auto.sh）
 
@@ -171,7 +169,7 @@ pgrep -af oci-arm-catcher
 环境变量：`OCI_USER_OCID`、`OCI_TENANCY_OCID`、`OCI_REGION`、`OCI_PUBLIC_KEY_ADDED=yes`、
 `OCI_SUBNET_ID`、`OCI_IMAGE_ID`、`OCI_OS`、`OCI_ARM_CATCHER_SRC`。
 
-注意部署器会把核心脚本安装到 `~/oci-arm-catcher/`，并在同目录生成 `.env`，所以两个脚本必须放在同一目录。
+部署器将核心脚本安装到 `~/oci-arm-catcher/` 并在同目录生成 `.env`，因此两个脚本必须位于同一目录。
 
 ### 提取器（oci-info-from-tabbit.sh）
 
@@ -200,15 +198,15 @@ flowchart TD
 | STOP | `LimitExceeded`、`NotAuthorizedOrNotFound`、`NotAuthenticated`、`InvalidParameter`、`CannotParseRequest`、`NotAllowed`、未知错误 | 立即停止。重试无意义。打印原因，提示检查配额或配置。 |
 | RETRY | `Out of host capacity`、`InternalError`、`TooManyRequests`、`ServiceUnavailable`、`timed out`、`RequestException` 等 | 等待 `RETRY_INTERVAL` 秒后重试。多个可用性域时依次轮换。 |
 
-三个设计要点：
+设计要点：
 
-1. 启动参数 `--no-retry` 关闭 OCI CLI 的内层重试。每次尝试耗时可控，重试间隔准确。
-2. 创建成功后核心脚本自动退出。重跑前先确认是否已创建实例。
-3. 2026-06 起，Always Free 的 A1 额度为 2 OCPU + 12GB。超配请求返回 `LimitExceeded`，命中 STOP 分类。
+1. `--no-retry` 关闭 OCI CLI 的内层重试，每次尝试耗时可控、重试间隔准确。
+2. 创建成功后脚本自动退出；重跑前先确认是否已创建实例。
+3. 2026-06 起 A1 额度为 2 OCPU + 12GB，超配返回 `LimitExceeded`，命中 STOP 分类。
 
 ## 🩺 离线自检
 
-自检不联网、不消耗配额，用桩命令喂真实错误流给核心脚本，看它怎么反应：
+自检不联网、不消耗配额，用桩命令模拟真实错误流：
 
 ```bash
 bash tests/catcher-selftest.sh
@@ -223,39 +221,39 @@ bash tests/catcher-selftest.sh
 
 ## ❓ 常见问题
 
-**1. 为什么不让工具从浏览器读取 API 私钥？**
+**1. 为什么不从浏览器读取 API 私钥？**
 
-读不到，也不该这么做。控制台只在生成密钥的那一刻提供一次私钥下载，之后永不再显示，丢了就只能删掉重建。所以工具包反过来做：私钥在服务器本地生成，全程不经过浏览器，你在控制台粘贴的公钥可以反复粘贴、丢了也无所谓。
+控制台只在生成密钥时提供一次私钥下载，之后不再显示，丢失后只能删除密钥重新生成。本工具包的方案是私钥在服务器本地生成，不经过浏览器；公钥可重复粘贴。
 
 **2. 认证失败（`oci iam region list` 报错）怎么办？**
 
-按这个顺序查：公钥是否整段粘贴、添加按钮是否点过、脚本算出的指纹和控制台列表是否一致。部署器允许失败后按回车重试，不用重跑整个流程。
+依次检查：公钥是否整段粘贴、是否点击"添加"、脚本输出的指纹与控制台列表是否一致。部署器支持失败后按回车重试。
 
 **3. 提取器报"未找到控制台标签页"怎么办？**
 
-先在 Tabbit 里登录 `cloud.oracle.com`，再运行提取器。Oracle 改版后菜单文案可能变化，按报错提示调整提取器里的中文关键词即可。
+先在 Tabbit 登录 `cloud.oracle.com`。Oracle 改版后菜单文案可能变化，按报错信息调整提取器中的中文关键词。
 
-**4. 日志出现 `LimitExceeded` 后工具停止。这是错误吗？**
+**4. 日志出现 `LimitExceeded` 后工具停止，是故障吗？**
 
-不是，这是设计如此。配额已满时再重试也不会有结果，核心脚本直接停下并把原因打印出来，免得白刷接口。
+不是。配额已满时重试无效，核心脚本停止并输出原因。
 
 **5. 创建成功后做什么？**
 
-到控制台 Compute → Instances 确认实例，记下公网 IP，然后从跑抢购的那台服务器登录：
+在控制台 Compute → Instances 确认实例并记录公网 IP，从执行抢购的服务器登录：
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 ubuntu@<实例公网IP>   # Ubuntu 镜像。Oracle Linux 用 opc。
+ssh -i ~/.ssh/id_ed25519 ubuntu@<实例公网IP>   # Ubuntu 镜像；Oracle Linux 为 opc
 ```
 
-私钥就是服务器上的 `~/.ssh/id_ed25519`。抢购进程在创建成功后已经自己退出了，用 `pgrep -af oci-arm-catcher` 可以确认。
+私钥位于该服务器的 `~/.ssh/id_ed25519`。抢购进程在创建成功后自动退出，用 `pgrep -af oci-arm-catcher` 确认。
 
 **6. 如何修改配置并重跑？**
 
-改 `~/oci-arm-catcher/.env` 再带参数跑一次核心脚本就行；整机重来时重新运行部署器，它可重复执行，不会覆盖已有密钥。
+修改 `~/oci-arm-catcher/.env` 后重跑核心脚本；或重新运行部署器。部署器可重复执行，不覆盖已有密钥。
 
-**7. 有没有其他自动化机制？Resource Manager Stack 是什么？**
+**7. Resource Manager Stack 是什么？**
 
-有。Resource Manager 的 Stack 相当于把"要创建什么机器"存成一份模板，之后反复执行它。真正触发执行的核心命令很短：
+Resource Manager 的 Stack 将实例配置保存为模板，可反复执行。执行命令：
 
 ```bash
 oci resource-manager job create-apply-job \
@@ -263,27 +261,27 @@ oci resource-manager job create-apply-job \
   --execution-plan-strategy AUTO_APPROVED
 ```
 
-核心脚本已经内置了这个模式，不必自己包一层循环。如果你在控制台（Developer Services → Resource Manager → Stacks）存过一个 A1 Flex Stack，直接这样跑：
+核心脚本已内置该模式。若控制台（Developer Services → Resource Manager → Stacks）中已有 A1 Flex Stack：
 
 ```bash
 ./oci-arm-catcher.sh --stack-id "ocid1.ormstack.oc1..."
 ```
 
-或者把 `STACK_OCID=ocid1.ormstack.oc1...` 写进 `.env`。作业状态的等待、失败后的退避（默认 300 秒）、成功后的退出，脚本都会处理好。
+或将 `STACK_OCID=ocid1.ormstack.oc1...` 写入 `.env`。作业等待、失败退避（默认 300 秒）与成功退出由脚本处理。
 
-两种模式怎么选：Direct Launch（默认）直接调 Compute API，能在多个可用性域之间轮换重试，命中率最高；Stack Apply 只需要一个 `STACK_OCID`，子网、镜像、SSH 路径全在 Stack 模板里，适合已经把配置放在控制台的人。
+模式选择：Direct Launch（默认）调用 Compute API，可在多个可用性域间轮换重试；Stack Apply 仅需 `STACK_OCID`，子网、镜像、SSH 路径均来自 Stack 模板。
 
 **8. 服务器会被甲骨文回收吗？**
 
-会。Oracle 对 Always Free 实例有闲置回收政策，低利用率达到阈值就可能被判定闲置并收回。阈值会变，以官方政策为准。结论很简单：免费实例不适合跑重要业务，有数据就定期备份。
+会。Oracle 对 Always Free 实例有闲置回收政策，低利用率达到阈值时可能被判定闲置并回收。阈值以官方政策为准。免费实例不适合承载重要业务，数据需定期备份。
 
 ## 🔒 安全与约定
 
-API 私钥只存在服务器的 `~/.oci/oci_api_key.pem`，权限 600，脚本不会把它发往任何地方。仓库源码里没有真实凭据，只有 `ocid1.user.*` 这类格式校验用的模式串，`.gitignore` 也把运行期生成的 `.env` 和密钥文件挡在版本库之外。
+API 私钥仅存于服务器 `~/.oci/oci_api_key.pem`（权限 600），脚本不向外发送数据。源码不含真实凭据，只有 `ocid1.user.*` 等格式校验模式；`.gitignore` 排除运行期生成的 `.env` 与密钥文件。
 
-脚本只用相对路径和 `$HOME`、`$LOCALAPPDATA` 这类标准环境变量，文档占位符统一为 `<KEY>`、`<SERVER>`、`<实例公网IP>`。
+脚本仅使用相对路径与 `$HOME`、`$LOCALAPPDATA` 等标准环境变量。文档占位符：`<KEY>`、`<SERVER>`、`<实例公网IP>`。
 
-`.env` 和 `oci-info.env` 里装的 OCID 本身不是机密，但整份文件仍建议按凭据对待：权限 600，不要入库。
+`.env` 与 `oci-info.env` 中的 OCID 非机密，但整份文件建议按凭据管理：权限 600，不入库。
 
 ## 🗂 版本
 
