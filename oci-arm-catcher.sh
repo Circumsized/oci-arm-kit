@@ -222,8 +222,8 @@ attempt_launch_direct() {
 }
 
 # 模式 2：Stack Apply (Resource Manager API)
-# 核心命令：
-# oci resource-manager job create-apply-job --stack-id "$STACK_ID" --execution-plan-strategy AUTO_APPROVED
+# 核心命令（$STACK_OCID 由 --stack-id / STACK_OCID / STACK_ID 归一化而来）：
+# oci resource-manager job create-apply-job --stack-id "$STACK_OCID" --execution-plan-strategy AUTO_APPROVED
 attempt_launch_stack() {
   local rc=0
   RUN_OUT="$(oci resource-manager job create-apply-job \

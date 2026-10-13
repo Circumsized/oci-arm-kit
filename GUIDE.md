@@ -318,7 +318,15 @@ ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
 
 ### 3.9 Stack OCID（可选，适用于 Stack Apply 模式）
 
-不想在命令行里逐个填子网、镜像和 AD 的话，可以改走 Stack 路线：在控制台预先存好一个资源堆栈（Stack），抢购时只给它一个 OCID。
+Stack 模式把实例配置保存在控制台的资源堆栈里，抢购时只需提供一个 OCID。它执行的核心命令是：
+
+```bash
+oci resource-manager job create-apply-job \
+  --stack-id "$STACK_OCID" \
+  --execution-plan-strategy AUTO_APPROVED
+```
+
+核心脚本已内置该模式（见 4.1 后的模式说明），无需自行封装循环。
 
 📍 **位置**　控制台导航菜单 → **Developer Services** → **Resource Manager** → **Stacks**。
 
@@ -326,12 +334,6 @@ ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
 
 1. 点击 **Create Stack**，按预置模板或自定义配置实例（Shape 选 `VM.Standard.A1.Flex`，2 OCPU + 12GB，粘贴 SSH 公钥）。
 2. 建好后进入该 Stack 详情页，找到 **OCID** 复制下来。
-3. 剩下的事核心脚本已经内置，它执行的正是这条命令：
-   ```bash
-   oci resource-manager job create-apply-job \
-     --stack-id "$STACK_OCID" \
-     --execution-plan-strategy AUTO_APPROVED
-   ```
 
 👀 **形态**　以 `ocid1.ormstack.oc1…` 开头。
 

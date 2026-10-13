@@ -182,6 +182,25 @@ pgrep -af oci-arm-catcher
 
 ## 🧠 核心算法
 
+核心脚本有两种执行模式，区别只在调用的 API：
+
+| 模式 | 调用 | 触发条件 |
+|---|---|---|
+| Direct Launch | `oci compute instance launch` | 默认 |
+| Stack Apply | `oci resource-manager job create-apply-job` | 传入 `--stack-id` 或配置 `STACK_OCID` |
+
+Stack Apply 模式执行的核心命令：
+
+```bash
+oci resource-manager job create-apply-job \
+  --stack-id "$STACK_OCID" \
+  --execution-plan-strategy AUTO_APPROVED
+```
+
+`AUTO_APPROVED` 跳过执行计划审批。脚本负责提交、等待作业状态、失败后按 `RETRY_INTERVAL` 退避、成功后退出。Stack 需预先在控制台 Developer Services → Resource Manager → Stacks 中创建。
+
+Direct Launch 模式的循环流程：
+
 ```mermaid
 flowchart TD
   S["第 N 次尝试<br/>当前可用性域"] --> L["调用 instance launch<br/>参数 --no-retry"]
