@@ -15,6 +15,7 @@
 
 - [📦 组件](#-组件)
 - [🔄 工作流程](#-工作流程)
+- [📝 前置条件](#-前置条件)
 - [🚀 快速开始](#-快速开始)
 - [⚙️ 脚本参考](#-脚本参考)
 - [🧠 核心算法](#-核心算法)
@@ -29,7 +30,7 @@
 | 文件 | 运行位置 | 作用 |
 |---|---|---|
 | `oci-arm-catcher.sh` | 服务器或任意 Linux | **核心脚本**。循环创建实例，分类错误，轮换可用性域，成功后退出。可独立运行。 |
-| `oci-arm-auto.sh` | 服务器（Ubuntu / Debian） | **部署器**。安装 OCI CLI、生成密钥、引导添加公钥、验证认证、查询子网与镜像、生成配置文件、启动抢购。 |
+| `oci-arm-auto.sh` | 服务器（Ubuntu / Debian，可用 E2.Micro 充当） | **部署器**。安装 OCI CLI、生成密钥、引导添加公钥、验证认证、查询子网与镜像、生成配置文件、启动抢购。 |
 | `oci-info-from-tabbit.sh` | 本机（Windows + Git Bash） | **提取器**。从已登录的 Tabbit 浏览器读取租户 OCID、用户 OCID、区域代码与指纹。 |
 | `tests/catcher-selftest.sh` | 任意（需 python3） | **离线自检**。用桩命令验证核心脚本，不触网。 |
 | `GUIDE.md` | — | **使用指南**。含每一项信息的获取位置、格式、验证方法与信息对照检查清单。 |
@@ -58,6 +59,16 @@ flowchart LR
 
 > 本机侧解决信息来源问题。服务器侧解决自动创建问题。
 
+## 📝 前置条件
+
+| 条件 | 说明 |
+|---|---|
+| Oracle Cloud 账号 | 还没有账号时，先读 [GUIDE.md](GUIDE.md) 第 10 章（注册导读）。**Home Region 选定后不可更改，Always Free 实例只能在 Home Region 创建。** |
+| 一台常开的 Linux 服务器 | Ubuntu 或 Debian。可用 Always Free E2.Micro（1/8 OCPU + 1GB）充当引导机，每账号最多 2 台。不要用自己的电脑 24 小时开机。 |
+| 网络访问 | 服务器需要能访问 OCI API（`cloud.oracle.com`）。 |
+
+额度口径：实例集上限为全部 A1 实例合计 2 OCPU + 12GB（2026-06 起）。月度用量池以你账号控制台横幅为准。
+
 ## 🚀 快速开始
 
 先选择方式：
@@ -65,8 +76,11 @@ flowchart LR
 | 你的情况 | 方式 | 入口 |
 |---|---|---|
 | 用 AI Agent（Claude Code、ZCode 等）代劳 | 方式 C | [Agent 提示词模板](#方式-cagent-提示词调用) |
-| 电脑装有 Tabbit，且已登录控制台 | 方式 A | 全自动流水线 |
-| 不用浏览器，愿按提示输入少量信息 | 方式 B | 部署器或核心脚本的交互模式 |
+| 电脑装有 Tabbit，且已登录控制台 | 方式 A | 全自动流水线（GUIDE 4.3） |
+| 不用 Tabbit，愿按提示输入少量信息 | 方式 B | 交互式部署（GUIDE 4.2） |
+| 想理解原理，逐条命令手工执行 | 方式 D | GUIDE 4.1 全手动 |
+
+**获取工具包**　`git clone https://github.com/Circumsized/oci-arm-kit.git`，或在仓库页 Code → Download ZIP。
 
 ### 方式 A：全自动（本机有 Tabbit）
 
@@ -83,19 +97,19 @@ ssh -t -i <KEY> ubuntu@<SERVER> "source ~/oci-info.env && bash ~/oci-arm-auto.sh
 
 部署器打印公钥后，在控制台粘贴该公钥，然后按回车。其余步骤自动完成。
 
-### 方式 B：交互式（无浏览器依赖）
+### 方式 B：交互式（不需要 Tabbit）
 
 ```bash
 scp -i <KEY> oci-arm-auto.sh oci-arm-catcher.sh ubuntu@<SERVER>:~/
 ssh -t -i <KEY> ubuntu@<SERVER> "bash ~/oci-arm-auto.sh"
 ```
 
-部署器依次提示三项操作：粘贴公钥确认、输入三个标识、完成。每一项都标注在控制台中的位置。
+部署器依次提示三项操作：粘贴公钥确认、按回车、输入三个标识（用户 OCID、租户 OCID、区域代码）。每一项都标注在控制台中的位置。部署器自动完成后台启动。
 
-单独运行核心脚本时，核心脚本逐项询问缺失的配置：
+部署结束后确认进程存活：
 
 ```bash
-cd ~/oci-arm-catcher && ./oci-arm-catcher.sh
+pgrep -af oci-arm-catcher
 ```
 
 ### 方式 C：Agent 提示词调用
@@ -231,18 +245,35 @@ Oracle 改版后菜单文案可能变化。按报错信息调整提取器中的�
 
 **5. 创建成功后做什么？**
 
-在控制台进入 Compute → Instances 确认实例。然后登录实例：
+在控制台进入 Compute → Instances 确认实例，并记录公网 IP。然后登录实例：
 
 ```bash
 ssh -i ~/.ssh/id_ed25519 ubuntu@<实例公网IP>   # Ubuntu 镜像。Oracle Linux 用 opc。
 ```
 
-确认抢购进程已退出：`pkill -f oci-arm-catcher`。
+私钥在运行抢购的服务器上（`~/.ssh/id_ed25519`）。确认抢购进程已退出：`pgrep -af oci-arm-catcher`。
 
 **6. 如何修改配置并重跑？**
 
 修改 `~/oci-arm-catcher/.env`，或带参数重跑核心脚本。重新部署整机时再次运行部署器。
 部署器可重复执行。
+
+**7. 有没有其他自动化机制？Resource Manager Stack 是什么？**
+
+有。Resource Manager 的 Stack 用 Terraform 模板部署资源。
+`oci resource-manager job create-apply-job --execution-plan-strategy AUTO_APPROVED` 可以跳过审批直接执行。
+
+取舍：Stack 每次调用只提交一次。它没有循环、没有退避、没有可用性域轮换、没有错误分类。
+这四项正是抢 ARM 容量的核心。本工具包直接调用 CLI，就是为了实现这四项。
+
+适用场景：已有 Terraform 工作流、想顺带管理基础设施的团队。用 Stack 加外层定时器。
+抢 ARM 容量的场景仍建议使用本工具包。
+
+**8. 服务器会被甲骨文回收吗？**
+
+会。Oracle 对 Always Free 实例有闲置回收政策。实例达到官方定义的低利用率条件时，
+可能被判定为闲置并回收。免费实例不是生产服务器。重要数据定期备份。
+回收阈值以 Oracle 官方政策为准。
 
 ## 🔒 安全与约定
 
@@ -257,6 +288,7 @@ ssh -i ~/.ssh/id_ed25519 ubuntu@<实例公网IP>   # Ubuntu 镜像。Oracle Linu
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v3.1.0 | 2026-10-13 | 文档补全：GUIDE 新增注册导读章（Home Region、失败排查、E2.Micro 引导机）；新增 401 逐字段检查表、界面版本自检表、进程检查命令、防扣费清单、闲置回收提示；README 新增前置条件与 Stack 替代方案 FAQ；术语表扩充。 |
 | v3.0.0 | 2026-10-13 | 核心算法独立成核心脚本。新增离线自检。部署器改为同目录安装，取消 git 依赖。文档重构。 |
 | v2.0.0 | 2026-10-13 | 统一帮助、选项与退出码。新增非交互模式、`--no-start`、`--subnet`、`--image`、`--os`。 |
 | v1.0.0 | 2026-10-13 | 初版。 |

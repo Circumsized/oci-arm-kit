@@ -6,7 +6,9 @@
 #   · User OCID       用户标识
 #   · Tenancy OCID    租户标识
 #   · REGION          当前区域代码（如 us-phoenix-1）
-#   · 控制台密钥指纹   已注册 API 密钥的指纹（供核对，非机密）
+#   · 控制台密钥指纹   已注册 API 密钥的指纹列表（非机密）
+#                     用途：判断控制台是否已有可用密钥。
+#                     有旧私钥文件时可跳过生成新密钥（部署器 --key 参数复用）。
 #
 # 抓取完成后自动把控制台标签页还原到"实例"列表页，不影响你的浏览状态。
 # 输出为标准 KEY=VALUE（可直接 eval 或 -o 写入文件），配合服务器端
@@ -174,6 +176,7 @@ fi
 
 # ── 结果输出（stdout 仅含可直接 eval 的行；OCRID/指纹均非机密，文件仍建议 600）─
 echo "# 控制台已有密钥指纹: ${FPS:-无}"
+echo "# （指纹用途：已有指纹且你保留着对应私钥文件时，可用部署器 --key 参数复用；否则忽略）"
 echo "export OCI_USER_OCID=$USER_OCID"
 echo "export OCI_TENANCY_OCID=$TENANCY_OCID"
 echo "export OCI_REGION=$REGION"
