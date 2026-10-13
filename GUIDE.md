@@ -334,6 +334,27 @@ ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
 > ⚠️ **注意**　抢到实例后，从**运行抢购的服务器**用此私钥登录。实例上只保存公钥。
 > 需要在本机登录时，把 `~/.ssh/id_ed25519` 私钥文件复制回本机。
 
+### 3.9 Stack OCID（可选，适用于 Stack Apply 模式）
+
+如果你不想在命令行里逐个配置子网、镜像和 AD，也可以在控制台预先配置好一个资源堆栈（Stack）。
+
+📍 **位置**　控制台导航菜单 → **Developer Services** → **Resource Manager** → **Stacks**。
+
+🧭 **步骤**
+
+1. 点击 **Create Stack**，配置选择预置模板或自定义实例（Shape 选 `VM.Standard.A1.Flex`，2 OCPU + 12GB，粘贴 SSH 公钥）。
+2. 创建完成后，进入该 Stack 详情页，找到 **OCID**，点击复制。
+3. 执行抢购的核心命令非常简单，核心脚本已原生内置：
+   ```bash
+   oci resource-manager job create-apply-job \
+     --stack-id "$STACK_OCID" \
+     --execution-plan-strategy AUTO_APPROVED
+   ```
+
+👀 **形态**　以 `ocid1.ormstack.oc1…` 开头。
+
+✅ **验证**　前缀为 `ocid1.ormstack.`。传入核心脚本：`./oci-arm-catcher.sh --stack-id "$STACK_OCID"`。
+
 ## 4. 🚀 三种使用路径
 
 **获取工具包**
@@ -347,14 +368,23 @@ cd oci-arm-kit
 
 不使用 git 时，在仓库页面点击 **Code → Download ZIP**，解压即可。
 
+**运行模式说明**　核心脚本支持两种底层引擎：
+
+- **Direct Launch 模式（默认推荐）**：直接调用 Compute API。支持多可用性域（AD）自动轮换重试，命中率最高。
+- **Stack Apply 模式（极简）**：直接调用 Resource Manager 核心命令：
+  ```bash
+  oci resource-manager job create-apply-job \
+    --stack-id "$STACK_OCID" \
+    --execution-plan-strategy AUTO_APPROVED
+  ```
+  无需在本地配置子网和镜像 OCID，仅需提供 `--stack-id` 即可自动退避循环。
+
 **服务器选择**　抢购进程要长期运行。不要用自己的电脑 24 小时开机。
 
 - 用一台 Always Free E2.Micro（1/8 OCPU + 1GB）充当引导机。每账号最多 2 台。
 - 引导机也必须建在 Home Region。
 - 部署器与核心脚本只依赖 bash、python3 与 OCI CLI。E2.Micro 的资源够用。
 - 1GB 内存安装 OCI CLI 偏紧。安装失败时先加 1GB swap 再重跑部署器。
-
-> 另见 README 常见问题 7：Resource Manager Stack 是另一种自动化机制。本工具包不采用它。
 
 ### 4.1 全手动
 
@@ -571,6 +601,11 @@ nohup ./oci-arm-catcher.sh > catcher.log 2>&1 < /dev/null &
 tail -f catcher.log
 pgrep -af oci-arm-catcher
 pkill -f oci-arm-catcher
+
+# 核心命令：Stack Apply 模式（Resource Manager）
+oci resource-manager job create-apply-job \
+  --stack-id "$STACK_OCID" \
+  --execution-plan-strategy AUTO_APPROVED
 
 # 离线自检（不触网）
 bash tests/catcher-selftest.sh

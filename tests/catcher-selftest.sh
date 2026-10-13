@@ -99,6 +99,18 @@ echo "== 用例 4：缺少必填配置 → 退出码 1 =="
 run_case t4 "$tmp/s1" "$tmp/bad.env"
 check "退出码 1 且列出缺项" 1 "缺少必填配置"
 
+echo "== 用例 5：Stack Apply 模式（传入 STACK_OCID）→ 成功 =="
+cat > "$tmp/s5" <<'EOF'
+{"data": {"id": "ocid1.ormjob.oc1.selftest.job1", "lifecycle-state": "SUCCEEDED"}}
+EOF
+cat > "$tmp/stack.env" <<EOF
+STACK_OCID=ocid1.ormstack.oc1.selftest.stack1
+RETRY_INTERVAL=60
+EOF
+run_case t5 "$tmp/s5" "$tmp/stack.env"
+check "Stack 模式识别并成功退出" 0 "Stack Apply (Resource Manager)"
+check "命中成功日志" 0 "SUCCESS! Stack Apply 成功执行"
+
 echo
 if (( fail == 0 )); then
   echo "全部通过：$pass 项检查 ✓"

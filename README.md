@@ -132,6 +132,7 @@ pgrep -af oci-arm-catcher
 
 ```text
 用法: ./oci-arm-catcher.sh [选项]
+  --stack-id OCID   启用 Stack 模式，直接执行已创建的 Resource Manager Stack
   --env-file FILE   指定配置文件。默认依次查找 ./arm.env、脚本同目录/arm.env、
                     ./.env、脚本同目录/.env。
   --name NAME       实例显示名。默认 arm-free-1。
@@ -142,14 +143,15 @@ pgrep -af oci-arm-catcher
   -h, --help        显示帮助。   -V, --version  显示版本号。
 ```
 
-| 配置键（.env 与环境变量同名） | 必填 | 说明 |
-|---|---|---|
-| `COMPARTMENT_ID` | 是 | 租户 OCID（根区间）或子区间 OCID |
-| `SSH_KEY_FILE` | 是 | 实例登录公钥路径（`.pub` 文件） |
-| `SUBNET_ID` | 是 | 公有子网 OCID |
-| `IMAGE_ID` | 是 | aarch64 镜像 OCID |
-| `AVAILABILITY_DOMAIN` 或 `AVAILABILITY_DOMAINS` | 是 | 单个，或逗号分隔多个。多个时轮换 |
-| `DISPLAY_NAME` / `OCPUS` / `MEMORY_GB` / `RETRY_INTERVAL` | 否 | 默认 `arm-free-1` / `2` / `12` / `300` |
+| 配置键（.env 与环境变量同名） | 模式 | 必填 | 说明 |
+|---|---|---|---|
+| `STACK_OCID` 或 `STACK_ID` | Stack 模式 | 是 | Resource Manager Stack OCID（传入则自动切换为 Stack 模式） |
+| `COMPARTMENT_ID` | Direct 模式 | 是 | 租户 OCID（根区间）或子区间 OCID |
+| `SSH_KEY_FILE` | Direct 模式 | 是 | 实例登录公钥路径（`.pub` 文件） |
+| `SUBNET_ID` | Direct 模式 | 是 | 公有子网 OCID |
+| `IMAGE_ID` | Direct 模式 | 是 | aarch64 镜像 OCID |
+| `AVAILABILITY_DOMAIN(S)` | Direct 模式 | 是 | 单个，或逗号分隔多个。多个时自动轮换 |
+| `DISPLAY_NAME` / `OCPUS` / `MEMORY_GB` / `RETRY_INTERVAL` | 通用 | 否 | 默认 `arm-free-1` / `2` / `12` / `300` |
 
 > **退出码**　`0` 成功。`1` 配置错误或不可重试错误。`2` 参数错误。`3` `--once` 模式容量不足。
 
@@ -260,14 +262,26 @@ ssh -i ~/.ssh/id_ed25519 ubuntu@<实例公网IP>   # Ubuntu 镜像。Oracle Linu
 
 **7. 有没有其他自动化机制？Resource Manager Stack 是什么？**
 
-有。Resource Manager 的 Stack 用 Terraform 模板部署资源。
-`oci resource-manager job create-apply-job --execution-plan-strategy AUTO_APPROVED` 可以跳过审批直接执行。
+有。Resource Manager 的 Stack（资源堆栈）可以用预先保存好的配置来创建实例。
+真正执行 Stack Apply 的官方核心命令其实非常简单：
 
-取舍：Stack 每次调用只提交一次。它没有循环、没有退避、没有可用性域轮换、没有错误分类。
-这四项正是抢 ARM 容量的核心。本工具包直接调用 CLI，就是为了实现这四项。
+```bash
+oci resource-manager job create-apply-job \
+  --stack-id "$STACK_OCID" \
+  --execution-plan-strategy AUTO_APPROVED
+```
 
-适用场景：已有 Terraform 工作流、想顺带管理基础设施的团队。用 Stack 加外层定时器。
-抢 ARM 容量的场景仍建议使用本工具包。
+**本工具包已原生支持该模式！** 你无需自己写包装脚本：
+- 如果你已在控制台（Developer Services → Resource Manager → Stacks）创建好了 A1 Flex Stack，直接运行核心脚本：
+  ```bash
+  ./oci-arm-catcher.sh --stack-id "ocid1.ormstack.oc1..."
+  ```
+  或者在 `.env` 中加入 `STACK_OCID=ocid1.ormstack.oc1...`。
+- 核心脚本会自动执行上述命令，并负责作业状态等待、失败安全退避（300秒）、成功后自动退出。
+
+对比与选择：
+- **Direct Launch 模式（默认）**：直接调 Compute API，支持自动跨多个可用性域（AD）轮换重试，命中率最高；
+- **Stack Apply 模式**：只需一个 `STACK_OCID`，无需配置子网/镜像/SSH 路径，适合偏好控制台预设配置的用户。
 
 **8. 服务器会被甲骨文回收吗？**
 

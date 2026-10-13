@@ -15,6 +15,7 @@
 #   bash oci-arm-auto.sh [选项]
 #
 # 选项:
+#   --stack-id OCID     启用 Stack 模式，透传 Resource Manager Stack OCID
 #   --key FILE          使用已有 API 私钥（如从控制台下载的 .pem），自动计算指纹
 #   --name NAME         实例显示名（默认 arm-free-1）
 #   --ocpus N           实例 OCPU 数（默认 2，2026-06 起免费额度上限 2）
@@ -57,6 +58,7 @@ CATCHER_DIR="$HOME/oci-arm-catcher"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 IMPORT_KEY=""; NONINTERACTIVE=0; NO_START=0
+STACK_ID="${STACK_ID:-${OCI_STACK_ID:-${STACK_OCID:-}}}"
 DISPLAY_NAME="${DISPLAY_NAME:-arm-free-1}"
 OCPUS_ARG="${OCPUS:-2}"; MEMORY_ARG="${MEMORY_GB:-12}"; INTERVAL_ARG="${RETRY_INTERVAL:-300}"
 SUBNET_ID="${OCI_SUBNET_ID:-}"; IMAGE_ID="${OCI_IMAGE_ID:-}"; OS_NAME="${OCI_OS:-Canonical Ubuntu}"
@@ -65,6 +67,7 @@ usage() { awk 'NR<=2{next} /^#={5,}/{exit} /^#/{sub(/^# ?/,""); print}' "$0"; ex
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --stack-id)       STACK_ID="${2:?缺少 OCID 参数}"; shift 2 ;;
     --key)            IMPORT_KEY="${2:?缺少 FILE 参数}"; shift 2 ;;
     --name)           DISPLAY_NAME="${2:?缺少 NAME 参数}"; shift 2 ;;
     --ocpus)          OCPUS_ARG="${2:?缺少 N 参数}"; shift 2 ;;
@@ -332,7 +335,17 @@ setup_catcher() {
   mkdir -p "$CATCHER_DIR"
   cp -f "$src" "$CATCHER_DIR/oci-arm-catcher.sh"
   chmod +x "$CATCHER_DIR/oci-arm-catcher.sh"
-  cat > "$CATCHER_DIR/.env" <<EOF
+
+  if [[ -n "$STACK_ID" ]]; then
+    cat > "$CATCHER_DIR/.env" <<EOF
+STACK_ID=$STACK_ID
+COMPARTMENT_ID=$TENANCY_OCID
+RETRY_INTERVAL=$INTERVAL_ARG
+EOF
+    chmod 600 "$CATCHER_DIR/.env"
+    ok "核心脚本与 .env 已就绪（Stack 模式）: $CATCHER_DIR/（Stack: $STACK_ID / ${INTERVAL_ARG}s）"
+  else
+    cat > "$CATCHER_DIR/.env" <<EOF
 COMPARTMENT_ID=$TENANCY_OCID
 DISPLAY_NAME=$DISPLAY_NAME
 SSH_KEY_FILE=$HOME/.ssh/id_ed25519.pub
@@ -343,8 +356,9 @@ OCPUS=$OCPUS_ARG
 MEMORY_GB=$MEMORY_ARG
 RETRY_INTERVAL=$INTERVAL_ARG
 EOF
-  chmod 600 "$CATCHER_DIR/.env"
-  ok "核心脚本与 .env 已就绪: $CATCHER_DIR/（$OCPUS_ARG OCPU / ${MEMORY_ARG}GB / ${INTERVAL_ARG}s）"
+    chmod 600 "$CATCHER_DIR/.env"
+    ok "核心脚本与 .env 已就绪（Direct 模式）: $CATCHER_DIR/（$OCPUS_ARG OCPU / ${MEMORY_ARG}GB / ${INTERVAL_ARG}s）"
+  fi
 }
 
 start_catcher() {
@@ -371,11 +385,13 @@ print_summary() {
 
 ${c_grn}${c_bld}部署完成${c_rst}（oci-arm-auto.sh v$VERSION）
 
-  实例配置 : VM.Standard.A1.Flex / $OCPUS_ARG OCPU / ${MEMORY_ARG}GB / 名称 $DISPLAY_NAME
-  重试策略 : 每 ${INTERVAL_ARG} 秒，容量不足时自动轮换可用区
+  运行模式 : $([[ -n "$STACK_ID" ]] && echo "Stack Apply（Resource Manager）" || echo "Direct Launch（Compute API）")
+  配置摘要 : $([[ -n "$STACK_ID" ]] && echo "Stack: $STACK_ID" || echo "规格: VM.Standard.A1.Flex / $OCPUS_ARG OCPU / ${MEMORY_ARG}GB / 名称: $DISPLAY_NAME")
+  重试策略 : 每 ${INTERVAL_ARG} 秒（容量不足自动退避重试$([[ -z "$STACK_ID" ]] && echo "，轮换可用区")）
   查看进度 : tail -f ~/oci-arm-catcher/catcher.log
+  检查进程 : pgrep -af oci-arm-catcher
   停止抢购 : pkill -f oci-arm-catcher.sh
-  成功判据 : 日志出现 "SUCCESS! Instance created: ocid1.instance..."（脚本随后自动退出）
+  成功判据 : 日志出现 "SUCCESS!"（脚本随后自动退出）
   登录新机 : ssh -i ~/.ssh/id_ed25519 ubuntu@<新实例公网IP>
              （Ubuntu 镜像默认用户 ubuntu；Oracle Linux 镜像为 opc）
 
@@ -396,10 +412,15 @@ main() {
   read_identifiers
   write_config
   verify_loop
-  query_ads
-  query_subnet
-  query_image
-  ensure_ssh_key
+  if [[ -n "$STACK_ID" ]]; then
+    [[ "$STACK_ID" == ocid1.ormstack.* ]] || die "STACK_ID 格式不对（应以 ocid1.ormstack. 开头）"
+    ok "使用已指定的 Stack: $STACK_ID（跳过 AD/子网/镜像查询）"
+  else
+    query_ads
+    query_subnet
+    query_image
+    ensure_ssh_key
+  fi
   setup_catcher
   start_catcher
   print_summary
