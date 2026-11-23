@@ -29,7 +29,7 @@
 #   --shape SHAPE     实例规格（默认 VM.Standard.A1.Flex）
 #   --ocpus N         Flex 规格 OCPU（默认 2）
 #   --memory N        Flex 规格内存 GB（默认 12）
-#   --ad-gap SEC      AD 间短间隔（默认 10）
+#   --ad-gap SEC      AD 间短间隔（默认 16，社区实证安全值，>=5）
 #   --interval SEC    外层退避基数（默认 300，实际加 ±10% 抖动）
 #   --max-attempts N  最大外层轮数（默认 0=无限）
 #   --poll-timeout SEC 单实例异步轮询超时（默认 300）
@@ -170,7 +170,7 @@ fi
 SHAPE="${SHAPE:-VM.Standard.A1.Flex}"
 DISPLAY_NAME="${DISPLAY_NAME:-arm-free-1}"
 OCPUS="${OCPUS:-2}"; MEMORY_GB="${MEMORY_GB:-12}"
-AD_GAP="${AD_GAP:-10}"; RETRY_INTERVAL="${RETRY_INTERVAL:-300}"
+AD_GAP="${AD_GAP:-16}"; RETRY_INTERVAL="${RETRY_INTERVAL:-300}"   # AD_GAP 16s = hitrov/oci-arm-host-capacity 生产实证值；外层 300s = deeplabua 默认(polite)
 POLL_TIMEOUT="${POLL_TIMEOUT:-300}"; MAX_ATTEMPTS="${MAX_ATTEMPTS:-0}"
 
 # 基础检查（非交互 shell 常见 ~/.local/bin 不在 PATH，先自愈）
@@ -260,9 +260,11 @@ STOP_CODES='LimitExceeded|NotAuthorizedOrNotFound|NotAuthenticated|InvalidParame
 RETRY_CODES='OutOfCapacity|InternalError|TooManyRequests|ServiceUnavailable|RequestTimeout|ServiceError|WorkRequestCanceled'
 # 文本兜底（收紧：不再裸匹配 FAILED）
 STOP_RE='[Ll]imit for this tenancy|limit[s]? .*exceeded|out of quota|QuotaExceeded|NotAuthorizedOrNotFound|NotAuthenticated'
-RETRY_RE='out of host capacity|out of capacity|InternalError|TooManyRequests|ServiceUnavailable|Service Unavailable|timed out|RequestException|ConnectionError|Temporary failure'
+RETRY_RE='out of host capacity|out of capacity|InternalError|ServiceUnavailable|Service Unavailable'
+# 网络层特征（HTTP 请求根本没到达/没返回——launch 可能已受理）
+NETWORK_RE='timed out|RequestException|ConnectionError|Temporary failure|Max retries exceeded|could not connect|Network is unreachable'
 
-classify() {  # classify OUTPUT → 返回 retry|stop|throttle|ok|unknown
+classify() {  # classify OUTPUT → 返回 retry|stop|throttle|network|unknown
   local out="$1" code
   code="$(err_code_of "$out")"
   case "$code" in
@@ -272,6 +274,12 @@ classify() {  # classify OUTPUT → 返回 retry|stop|throttle|ok|unknown
     OutOfCapacity|InternalError|ServiceUnavailable|RequestTimeout|ServiceError|WorkRequestCanceled)
       echo retry; return ;;
   esac
+  # 4xx 但 message 是容量类（OCI 偶有此行为）→ 可重试
+  if printf '%s' "$out" | grep -qiE 'out of (host )?capacity' && ! printf '%s' "$out" | grep -qiE "$STOP_RE"; then
+    echo retry; return
+  fi
+  # 网络层：无错误码、请求未达 OCI——launch 可能已成功，须同 AD 先查后试
+  if printf '%s' "$out" | grep -qiE "$NETWORK_RE"; then echo network; return; fi
   if printf '%s' "$out" | grep -qiE "$STOP_RE"; then echo stop; return; fi
   if printf '%s' "$out" | grep -qiE "$RETRY_RE"; then echo retry; return; fi
   echo unknown
@@ -281,7 +289,7 @@ throttle_backoff() {  # 429 专用：指数退避 1s→60s（官方"数秒起最
   local w=1
   while (( w <= 60 )); do
     warn "触发限流(429)，退避 ${w}s …"
-    sleep "$w"
+    sleep "$w" 9>&-   # 9>&-：sleep 子进程不继承锁 fd（防父进程被杀后孤儿 sleep 持锁）
     w=$(( w * 2 ))
   done
   warn "限流退避完成，继续重试"
@@ -361,7 +369,7 @@ await_running() {
         return 1 ;;
       *) : ;;  # PROVISIONING/STARTING 等继续等
     esac
-    sleep "$gap"
+    sleep "$gap" 9>&-
     waited=$(( waited + gap ))
     gap=$(( gap < 20 ? gap * 2 : 20 ))
   done
@@ -401,6 +409,19 @@ attempt_launch_stack() {
     --no-retry 2>&1)" || rc=$?
   printf '%s' "$RUN_OUT" | grep -qi '"lifecycle-state":\s*"SUCCEEDED"' && return 0
   return "$rc"
+}
+
+succeed() {  # succeed AD —— 统一成功路径：打印 + 通知 + 退出 0
+  local ad="$1" pub
+  pub="$(public_ip_of "$LAUNCHED_ID")"
+  ok "SUCCESS! 实例已创建并 RUNNING"
+  ok "  OCID    : $LAUNCHED_ID"
+  ok "  公网 IP : ${pub:-（VNIC 未就绪，稍后 oci compute instance list-vnics --instance-id $LAUNCHED_ID）}"
+  ok "  登录    : ssh -i <私钥> ubuntu@${pub:-<ip>}（Ubuntu 镜像默认用户 ubuntu）"
+  notify "oci-arm-kit 抢购成功 🎉" "实例 $DISPLAY_NAME 已创建（$ad）
+OCID: $LAUNCHED_ID
+公网 IP: ${pub:-pending}"
+  exit 0
 }
 
 # ── dry-run：校验配置与认证，打印将执行的命令 ──────────────────────────────────
@@ -471,13 +492,25 @@ while true; do
     case "$(classify "$RUN_OUT")" in
       stop) die "不可重试错误（$(err_msg_of "$RUN_OUT")）" ;;
       throttle) throttle_backoff; continue ;;
+      network)
+        warn "网络类错误，2s 后重试"
+        sleep 2 9>&-
+        if attempt_launch_stack; then
+          ok "SUCCESS! Stack Apply 成功"
+          notify "oci-arm-kit Stack 抢购成功" "Stack $STACK_ID apply 成功"
+          exit 0
+        fi
+        warn "重试仍失败: $(err_msg_of "$RUN_OUT")"
+        if (( ONCE )); then exit 3; fi
+        sleep $(( RETRY_INTERVAL + RANDOM % (RETRY_INTERVAL / 5) - RETRY_INTERVAL / 10 )) 9>&- 9>&-
+        ;;
       retry|unknown)
         warn "本轮失败: $(err_msg_of "$RUN_OUT")"
         if (( ONCE )); then exit 3; fi
         if (( MAX_ATTEMPTS > 0 && sweep >= MAX_ATTEMPTS )); then
           warn "已达最大轮数 MAX_ATTEMPTS=$MAX_ATTEMPTS"; exit 3
         fi
-        sleep $(( RETRY_INTERVAL + RANDOM % (RETRY_INTERVAL / 5) - RETRY_INTERVAL / 10 ))
+        sleep $(( RETRY_INTERVAL + RANDOM % (RETRY_INTERVAL / 5) - RETRY_INTERVAL / 10 )) 9>&- 9>&-
         ;;
     esac
     continue
@@ -490,20 +523,12 @@ while true; do
     # 探针：明显不可用则跳过（省一次 create，降低限流面）
     if ! probe_ad "$ad"; then
       if (( ONCE )); then continue; fi
-      sleep "$AD_GAP"
+      sleep "$AD_GAP" 9>&-
       continue
     fi
 
     if launch_and_await "$ad"; then
-      pub="$(public_ip_of "$LAUNCHED_ID")"
-      ok "SUCCESS! 实例已创建并 RUNNING"
-      ok "  OCID    : $LAUNCHED_ID"
-      ok "  公网 IP : ${pub:-（VNIC 未就绪，稍后 oci compute instance list-vnics --instance-id $LAUNCHED_ID）}"
-      ok "  登录    : ssh -i <私钥> ubuntu@${pub:-<ip>}（Ubuntu 镜像默认用户 ubuntu）"
-      notify "oci-arm-kit 抢购成功 🎉" "实例 $DISPLAY_NAME 已创建（$ad）
-OCID: $LAUNCHED_ID
-公网 IP: ${pub:-pending}"
-      exit 0
+      succeed "$ad"
     fi
 
     case "$(classify "$RUN_OUT")" in
@@ -512,6 +537,20 @@ OCID: $LAUNCHED_ID
       throttle)
         throttle_backoff
         continue ;;
+      network)
+        # 网络类：launch 可能已受理只是响应丢失。等效 opc-retry-token 的 CLI 实现：
+        # 不换 AD，先查防重（查到了=刚才已创建成功，收下），2s 后同 AD 重试一次
+        warn "网络类错误（$(err_msg_of "$RUN_OUT")）——同 AD 先查后试"
+        sleep 2 9>&-
+        if launch_and_await "$ad"; then
+          succeed "$ad"
+        fi
+        case "$(classify "$RUN_OUT")" in
+          stop) die "不可重试错误（$(err_msg_of "$RUN_OUT")）——多为配额已满或配置问题" ;;
+          throttle) throttle_backoff; continue ;;
+          retry|unknown) warn "重试仍失败: $(err_msg_of "$RUN_OUT")" ;;
+        esac
+        ;;
       retry|unknown)
         warn "创建失败: $(err_msg_of "$RUN_OUT")"
         ;;
@@ -529,5 +568,5 @@ OCID: $LAUNCHED_ID
     exit 3
   fi
   # 外层退避：基数 + ±10% 随机抖动（错峰，避免整点撞限流）
-  sleep $(( RETRY_INTERVAL + RANDOM % (RETRY_INTERVAL / 5) - RETRY_INTERVAL / 10 ))
+  sleep $(( RETRY_INTERVAL + RANDOM % (RETRY_INTERVAL / 5) - RETRY_INTERVAL / 10 )) 9>&-
 done

@@ -105,3 +105,18 @@ tail -f ~/oci-arm-catcher/catcher.log
 - **错误码优先**：解析响应 `"code"` 字段（OutOfCapacity/TooManyRequests/LimitExceeded…），文本仅兜底；429 单独指数退避不计失败
 - **探针**：`compute-capacity-report` 只读预检，筛除明显无池的 AD，减少无效 create（降低限流面）；注意 micro 可能报 AVAILABLE 仍抢不到——探针是筛除判据不是充分判据
 - **官方边界**：Always Free 仅 home region；micro 只能在一个 AD 创建；纯免费账户无 Support 工单资格（付费账户有）
+
+## 9. 与社区标杆的频率对比（2026-11 源码级取证）
+
+| 项目 | AD 间间隔 | 外层节奏 | 抖动 | 预查容量 | 429 处理 | 防重机制 |
+|---|---|---|---|---|---|---|
+| hitrov/oci-arm-host-capacity ⭐1308（PHP） | 16s | cron 每分钟唤起 | 无 | 否（launch 即试探） | 文件冷却锁（秒数可配） | 实例数预检（≥上限退出） |
+| deeplabua/oci-arm-catcher ⭐79（Rust 重写） | 每次 attempt 换一个 AD | 固定 300s | 无 | 否 | 与容量同等待遇 | `opc-retry-token` 幂等重发 |
+| futchas/oracle-cloud-free-arm-instance ⭐57（Shell） | 单 AD 不轮换 | 60s（注释警告：再低撞 429） | 无 | 否 | 无分支 | 无 |
+| **本脚本 v4.0.1** | **16s** | **300s±10%** | **±10%** | **是（capacity-report）** | **指数退避 1→60s** | **flock + 同名预检 + 同 AD 先查后试** |
+
+**三家共识（本脚本全部实现）**：`--no-retry` 必备（否则 SDK 内部重试使外层间隔失效、看似卡死）；错误分类不能只靠状态码（容量不足实为 HTTP 500 + InternalError + "Out of host capacity"）；成功即退（futchas 缺此项，会空转撞配额）。
+
+**本脚本差异化**：探针预查（micro one-AD 场景直接跳过无池 AD，省无效 create）+ 429 指数退避（对齐官方"数秒起最长 60s"口径）+ ±10% 抖动错峰 + network 类同 AD 先查后试（OCI CLI 不暴露 `--opc-retry-token` 参数，用"同 AD 先查后试"等效实现其幂等语义）。
+
+**已知边界**：三家项目均只抓 A1.Flex，无 micro 适配——本脚本的 micro 支持（固定规格跳过 shape-config、探针 one-AD 行为、200GB 卷额度利用）是自研扩展。
