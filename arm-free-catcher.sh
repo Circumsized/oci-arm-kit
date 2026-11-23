@@ -178,6 +178,17 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 command -v oci >/dev/null 2>&1 || die "未找到 oci 命令（OCI CLI）"
 command -v python3 >/dev/null 2>&1 || die "未找到 python3"
 command -v curl >/dev/null 2>&1 || die "未找到 curl（通知功能需要）"
+
+# 全局锁：防同机多入口并发（systemd + cron + 手动同时跑会超额创建）
+# dry-run 跳过锁检查（诊断优先）
+acquire_lock() {
+  command -v flock >/dev/null 2>&1 || { warn "flock 不可用，全局锁降级跳过"; return 0; }
+  LOCK_FILE="${LOCK_FILE:-$SCRIPT_DIR/.catcher.lock}"
+  exec 9>"$LOCK_FILE" || { warn "无法打开锁文件 $LOCK_FILE，跳过"; return 0; }
+  flock -n 9 || die "另一抢购进程持有锁（$LOCK_FILE）——防重创建保护。确认无其他进程在跑后删除该文件重试。"
+  ok "已获取全局锁: $LOCK_FILE"
+}
+[[ "$DRY_RUN" -eq 1 ]] || acquire_lock
 [[ "$OCPUS" =~ ^[0-9]+$ && "$MEMORY_GB" =~ ^[0-9]+$ ]] || die "OCPUS/MEMORY_GB 必须是数字"
 [[ "$AD_GAP" =~ ^[0-9]+$ && "$RETRY_INTERVAL" =~ ^[0-9]+$ && "$POLL_TIMEOUT" =~ ^[0-9]+$ ]] \
   || die "AD_GAP/RETRY_INTERVAL/POLL_TIMEOUT 必须是数字"
@@ -413,10 +424,36 @@ dry_run() {
 }
 
 # ── 主流程 ────────────────────────────────────────────────────────────────────
+# 防重创建：同名实例已 RUNNING/PROVISIONING 则不重复发起（脚本重启/多入口部署场景）
+preflight_existing() {
+  [[ "$MODE" == "direct" ]] || return 0
+  # ListInstances 不支持 lifecycle-state 服务端过滤，按 display-name 查后客户端过滤
+  local existing
+  existing=$(oci compute instance list \
+    --compartment-id "$COMPARTMENT_ID" \
+    --display-name "$DISPLAY_NAME" \
+    --output json 2>/dev/null \
+    | python3 -c 'import sys,json
+d=json.load(sys.stdin).get("data",[])
+live=[i for i in d if i.get("lifecycle-state") in ("RUNNING","PROVISIONING")]
+print(live[0]["id"] if live else "")' 2>/dev/null || true)
+  if [[ -n "$existing" ]]; then
+    local ip
+    ip="$(public_ip_of "$existing")"
+    ok "已存在同名实例（RUNNING/PROVISIONING）: $existing"
+    ok "  公网 IP: ${ip:-（查询中，稍后 list-vnics）}——防重创建，不重复发起"
+    notify "oci-arm-kit：实例已存在" "$DISPLAY_NAME 已在运行: $existing
+公网 IP: ${ip:-pending}"
+    exit 0
+  fi
+  info "防重预检通过（无同名 RUNNING/PROVISIONING 实例）"
+}
+
 printf '\n%sarm-free-catcher.sh v%s（%s 模式）%s\n' "$c_bld" "$VERSION" "$MODE" "$c_rst"
 info "规格: $SHAPE | AD 间 ${AD_GAP}s | 外层 ${RETRY_INTERVAL}s±10% | 轮询超时 ${POLL_TIMEOUT}s | 探针 $(( NO_PROBE ? 0 : 1 ))"
 
 [[ "$DRY_RUN" -eq 1 ]] && dry_run
+preflight_existing
 
 attempt=0; sweep=0; RUN_OUT=""; LAUNCHED_ID=""
 while true; do

@@ -75,10 +75,13 @@ tail -f ~/oci-arm-catcher/catcher.log
 | systemd | `systemctl --user stop arm-free-catcher && systemctl --user disable arm-free-catcher` |
 | 前台 | Ctrl-C |
 
+停止后锁文件 `.catcher.lock` 自动释放（flock 语义）；如遇 `另一抢购进程持有锁` 且确认无进程，删该文件即可。
+
 ## 6. 故障排查
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
+| `另一抢购进程持有锁` | 全局 flock 防重触发（systemd+cron+手动多入口并发） | 保留一个入口即可；确认无进程后删 `~/oci-arm-catcher/.catcher.lock` |
 | `未找到 oci 命令` | PATH | 脚本已自愈 `~/.local/bin`；若用 cron 确认 flock/curl 存在 |
 | `认证失败` | ~/.oci/config 无效 | `oci iam region list` 手动验证 |
 | 探针 `无响应` | 该 API 对该 shape/AD 不支持（如 flex 缺 config） | 脚本已处理；持续无响应可 `--no-probe` |
