@@ -1,0 +1,15 @@
+[Unit]
+Description=arm-free-catcher — Oracle Always Free instance catcher (v4.0.0)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/oci-arm-catcher
+ExecStart=%h/oci-arm-catcher/arm-free-catcher.sh
+# 抢到后 exit 0 不重启（正常终结）；异常退出（1/2/3）60s 后拉起
+Restart=on-failure
+RestartSec=60
+# 限流退避脚本内部自治，systemd 不叠加
+
+[Install]
+WantedBy=default.target
