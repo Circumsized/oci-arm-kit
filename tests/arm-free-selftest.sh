@@ -97,7 +97,7 @@ run_case() {   # run_case <名称> <launch脚本文件> <env文件> [额外参�
   STUB_L_STATE="$tmp/state" STUB_LAUNCH_SCRIPT="$script" \
   LOCK_FILE="$tmp/test.lock" LOG_FILE="$tmp/test.log" \
     PATH="$tmp/bin:$PATH" \
-    "$CATCHER" --env-file "$envf" "$@" >"$tmp/out" 2>&1 </dev/null || RC=$?
+    bash "$CATCHER" --env-file "$envf" "$@" >"$tmp/out" 2>&1 </dev/null || RC=$?
 }
 check() {   # check <描述> <期望rc> <grep模式或空>
   local desc="$1" want="$2" pat="${3:-}"

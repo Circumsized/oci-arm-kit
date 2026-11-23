@@ -59,7 +59,7 @@ run_case() {   # run_case <名称> <脚本行文件或空> <env文件> [额外�
   rm -f "$tmp/state"
   RC=0
   STUB_STATE="$tmp/state" STUB_SCRIPT="$script" PATH="$tmp/bin:$PATH" \
-    "$CATCHER" --env-file "$envf" "$@" >"$tmp/out" 2>&1 </dev/null || RC=$?
+    bash "$CATCHER" --env-file "$envf" "$@" >"$tmp/out" 2>&1 </dev/null || RC=$?
 }
 check() {   # check <描述> <期望rc> <grep模式或空>
   local desc="$1" want="$2" pat="${3:-}"
