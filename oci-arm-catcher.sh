@@ -130,7 +130,8 @@ MEMORY_GB="${MEMORY_GB:-12}";              RETRY_INTERVAL="${RETRY_INTERVAL:-300
 
 # 基础命令检查
 command -v oci >/dev/null 2>&1 || die "未找到 oci 命令（OCI CLI）——请先安装，见 README"
-command -v python3 >/dev/null 2>&1 || die "未找到 python3（用于解析返回结果）"
+PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+command -v "$PY" >/dev/null 2>&1 || die "未找到 python3/python（用于解析返回结果）"
 [[ "$OCPUS" =~ ^[0-9]+$ ]] && [[ "$MEMORY_GB" =~ ^[0-9]+$ && "$RETRY_INTERVAL" =~ ^[0-9]+$ ]] || die "OCPUS/MEMORY_GB/RETRY_INTERVAL 必须是数字"
 (( RETRY_INTERVAL >= 60 )) || die "RETRY_INTERVAL 过小（建议 >=300）"
 (( RETRY_INTERVAL >= 300 )) || warn "RETRY_INTERVAL=$RETRY_INTERVAL 秒，低于 300 可能触发限流"
@@ -243,7 +244,7 @@ attempt_launch_stack() {
 }
 
 target_id_from() {
-  printf '%s' "$1" | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null \
+  printf '%s' "$1" | "$PY" -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null \
     || printf '%s' "$1" | grep -oP 'ocid1\.(instance|ormjob)\.[A-Za-z0-9._-]+' | head -1 || echo "unknown"
 }
 

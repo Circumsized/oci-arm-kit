@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: syntax (bash -n)
+        run: |
+          for f in *.sh tests/*.sh; do
+            echo "::group::bash -n $f"
+            bash -n "$f"
+            echo "::endgroup::"
+          done
+
+      - name: shellcheck (v4 core, error-level)
+        run: shellcheck -S error arm-free-catcher.sh
+
+      - name: self-test — v4 core (arm-free-catcher.sh)
+        run: bash tests/arm-free-selftest.sh
+
+      - name: self-test — legacy core (oci-arm-catcher.sh)
+        run: bash tests/catcher-selftest.sh

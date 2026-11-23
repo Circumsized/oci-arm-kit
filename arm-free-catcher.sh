@@ -176,7 +176,9 @@ POLL_TIMEOUT="${POLL_TIMEOUT:-300}"; MAX_ATTEMPTS="${MAX_ATTEMPTS:-0}"
 # 基础检查（非交互 shell 常见 ~/.local/bin 不在 PATH，先自愈）
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 command -v oci >/dev/null 2>&1 || die "未找到 oci 命令（OCI CLI）"
-command -v python3 >/dev/null 2>&1 || die "未找到 python3"
+# python3 优先，回退 python（Windows Git Bash 常只有 python.exe）
+PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+command -v "$PY" >/dev/null 2>&1 || die "未找到 python3/python"
 command -v curl >/dev/null 2>&1 || die "未找到 curl（通知功能需要）"
 
 # 全局锁：防同机多入口并发（systemd + cron + 手动同时跑会超额创建）
@@ -339,18 +341,18 @@ build_launch_args() {   # 填充全局数组 LAUNCH_CMD（直接执行，避开�
 }
 
 instance_id_of() {
-  printf '%s' "$1" | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null \
+  printf '%s' "$1" | "$PY" -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null \
     || printf '%s' "$1" | grep -oP 'ocid1\.instance\.[A-Za-z0-9._-]+' | head -1 || true
 }
 
 instance_state() {
   oci compute instance get --instance-id "$1" --output json 2>/dev/null \
-    | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["lifecycle-state"])' 2>/dev/null || echo UNKNOWN
+    | "$PY" -c 'import sys,json;print(json.load(sys.stdin)["data"]["lifecycle-state"])' 2>/dev/null || echo UNKNOWN
 }
 
 public_ip_of() {
   oci compute instance list-vnics --instance-id "$1" --output json 2>/dev/null \
-    | python3 -c 'import sys,json
+    | "$PY" -c 'import sys,json
 v=json.load(sys.stdin)["data"]
 print(v[0]["public-ip"] if v and v[0].get("public-ip") else "")' 2>/dev/null || true
 }
@@ -454,7 +456,7 @@ preflight_existing() {
     --compartment-id "$COMPARTMENT_ID" \
     --display-name "$DISPLAY_NAME" \
     --output json 2>/dev/null \
-    | python3 -c 'import sys,json
+    | "$PY" -c 'import sys,json
 d=json.load(sys.stdin).get("data",[])
 live=[i for i in d if i.get("lifecycle-state") in ("RUNNING","PROVISIONING")]
 print(live[0]["id"] if live else "")' 2>/dev/null || true)
